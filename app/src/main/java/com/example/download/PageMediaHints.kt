@@ -41,8 +41,10 @@ object PageMediaHints {
         "user", "c", "@me"
     )
 
-    fun hostOf(url: String): String =
-        runCatching { URI(url).host }.getOrNull().orEmpty().removePrefix("www.").lowercase()
+    fun hostOf(url: String): String {
+        val raw = runCatching { URI(url).host }.getOrNull().orEmpty().lowercase()
+        return raw.removePrefix("www.").removePrefix("m.")
+    }
 
     fun isSupportedHost(url: String): Boolean {
         val host = hostOf(url)
