@@ -1,5 +1,11 @@
 package com.example.data.model
 
+/**
+ * A downloadable file that was really found on the current page.
+ *
+ * Every field is filled from what the server actually answered (content type,
+ * content length, file name), never guessed from the URL string.
+ */
 data class DetectedMedia(
     val id: String = java.util.UUID.randomUUID().toString(),
     val url: String,
@@ -9,7 +15,13 @@ data class DetectedMedia(
     val estimatedBytes: Long = 0L,
     val thumbnailUrl: String? = null,
     val sourcePageUrl: String = "",
-    val detectedAt: Long = System.currentTimeMillis()
+    val detectedAt: Long = System.currentTimeMillis(),
+    /** Kind of media reported by the server. */
+    val mediaType: MediaType = MediaType.VIDEO,
+    /** File name the download will be saved under. */
+    val fileName: String = "",
+    /** HLS/DASH manifests and streaming pages have to go through yt-dlp. */
+    val requiresYtDlp: Boolean = false
 )
 
 data class ExtractedVideoOption(

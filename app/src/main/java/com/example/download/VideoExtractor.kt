@@ -7,6 +7,7 @@ import com.example.data.model.DownloadEngine
 import com.example.data.model.ExtractedVideoOption
 import com.example.data.model.VideoInfo
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -29,8 +30,8 @@ class VideoExtractor(
     private val engine: YtDlpEngine = YtDlpEngine,
     private val remote: YtDlpExtractor = YtDlpExtractor(),
     private val client: OkHttpClient = OkHttpClient.Builder()
-        .connectTimeout(15, TimeUnit.SECONDS)
-        .readTimeout(20, TimeUnit.SECONDS)
+        .connectTimeout(12, TimeUnit.SECONDS)
+        .readTimeout(15, TimeUnit.SECONDS)
         .followRedirects(true)
         .followSslRedirects(true)
         .build()
@@ -66,21 +67,37 @@ class VideoExtractor(
     }
 
     /** yt-dlp on device first, configured yt-dlp service second. */
-    private suspend fun extractWithYtDlp(url: String): Result<VideoInfo> {
+    private suspend fun extractWithYtDlp(url: String): Result<VideoInfo> = withContext(Dispatchers.IO) {
+        // Fast-path preview for instant poster/title while yt-dlp starts
+        val instantPreview = LinkPreviewFetcher.instant(url)
+        val previewDeferred = async { LinkPreviewFetcher.fetch(url) }
+
         val local = engine.fetchInfo(context, url)
-        if (local.isSuccess) return local
+        if (local.isSuccess) {
+            val info = local.getOrThrow()
+            val bestThumbnail = info.thumbnailUrl
+                ?: instantPreview?.thumbnailUrl
+                ?: previewDeferred.await()?.thumbnailUrl
+            return@withContext Result.success(info.copy(thumbnailUrl = bestThumbnail))
+        }
 
         if (BuildConfig.YTDLP_API_URL.isNotBlank()) {
             val fallback = remote.extract(url)
-            if (fallback.isSuccess) return fallback
+            if (fallback.isSuccess) {
+                val info = fallback.getOrThrow()
+                val bestThumbnail = info.thumbnailUrl
+                    ?: instantPreview?.thumbnailUrl
+                    ?: previewDeferred.await()?.thumbnailUrl
+                return@withContext Result.success(info.copy(thumbnailUrl = bestThumbnail))
+            }
         }
 
         // Last resort: the link may still be a media file served without a
         // recognisable extension (CDN links, signed URLs, ...).
         val direct = inspectDirectUrl(url)
-        if (direct.isSuccess) return direct
+        if (direct.isSuccess) return@withContext direct
 
-        return local
+        local
     }
 
     private fun isDirectMediaUrl(url: String): Boolean {
@@ -122,6 +139,7 @@ class VideoExtractor(
                 when {
                     contentType.contains("audio") -> "mp3"
                     contentType.contains("video") -> "mp4"
+                    contentType.contains("image") -> "jpg"
                     else -> "bin"
                 }
             }
@@ -139,14 +157,13 @@ class VideoExtractor(
             val cleanTitle = if (title.length > 60) title.take(60) + "…" else title
 
             val isAudio = contentType.contains("audio") || extension in AUDIO_EXTENSIONS
+            val isImage = contentType.contains("image") || extension in IMAGE_EXTENSIONS
 
-            // One link is one stream: reporting extra "qualities" here would only
-            // download the very same bytes under a different label.
             val option = ExtractedVideoOption(
-                qualityLabel = if (isAudio) {
-                    "Original audio (${extension.uppercase()})"
-                } else {
-                    "Original quality (${extension.uppercase()})"
+                qualityLabel = when {
+                    isAudio -> "Original audio (${extension.uppercase()})"
+                    isImage -> "Image (${extension.uppercase()})"
+                    else -> "Original quality (${extension.uppercase()})"
                 },
                 format = extension.uppercase(),
                 estimatedBytes = contentLength,
@@ -159,7 +176,7 @@ class VideoExtractor(
                 VideoInfo(
                     title = cleanTitle,
                     sourceUrl = url,
-                    thumbnailUrl = null,
+                    thumbnailUrl = if (isImage) url else null,
                     durationSeconds = 0L,
                     author = "Direct link",
                     options = listOf(option)
@@ -175,9 +192,11 @@ class VideoExtractor(
             "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Mobile Safari/537.36"
 
         private val AUDIO_EXTENSIONS = setOf("mp3", "m4a", "aac", "wav", "ogg", "opus", "flac")
+        private val IMAGE_EXTENSIONS = setOf("jpg", "jpeg", "png", "webp", "gif", "bmp", "avif")
 
-        private val DIRECT_MEDIA_EXTENSIONS = AUDIO_EXTENSIONS + setOf(
-            "mp4", "webm", "mkv", "mov", "avi", "flv", "3gp", "ts", "m4v", "mpg", "mpeg", "wmv"
+        private val DIRECT_MEDIA_EXTENSIONS = AUDIO_EXTENSIONS + IMAGE_EXTENSIONS + setOf(
+            "mp4", "webm", "mkv", "mov", "avi", "flv", "3gp", "ts", "m4v", "mpg", "mpeg", "wmv",
+            "pdf", "apk", "zip", "rar", "7z", "tar", "gz", "doc", "docx", "xls", "xlsx"
         )
     }
 }

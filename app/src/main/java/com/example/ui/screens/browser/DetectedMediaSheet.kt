@@ -17,9 +17,12 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Download
+import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.MusicNote
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -28,6 +31,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
@@ -39,11 +43,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.material.icons.filled.Description
-import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material3.OutlinedButton
 import com.example.data.model.DetectedMedia
+import com.example.data.model.MediaType
 import com.example.download.AppDownloadManager
+import com.example.ui.components.MediaThumbnail
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -170,11 +173,6 @@ fun DetectedMediaSheet(
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     items(mediaList, key = { it.id }) { media ->
-                        val lowerUrl = media.url.lowercase()
-                        val isAudio = media.mimeType.contains("audio") || lowerUrl.endsWith(".mp3") || lowerUrl.endsWith(".m4a")
-                        val isFile = lowerUrl.endsWith(".pdf") || lowerUrl.endsWith(".apk") || lowerUrl.endsWith(".zip") ||
-                            lowerUrl.endsWith(".rar") || lowerUrl.endsWith(".docx") || lowerUrl.endsWith(".xlsx") ||
-                            media.mimeType.contains("pdf") || media.mimeType.contains("zip") || media.mimeType.contains("android")
                         Card(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -188,24 +186,20 @@ fun DetectedMediaSheet(
                                     .padding(12.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Box(
+                                MediaThumbnail(
+                                    model = media.thumbnailUrl,
+                                    fallbackIcon = when (media.mediaType) {
+                                        MediaType.AUDIO -> Icons.Default.MusicNote
+                                        MediaType.DOCUMENT -> Icons.Default.Description
+                                        MediaType.IMAGE -> Icons.Default.Image
+                                        else -> Icons.Default.Movie
+                                    },
+                                    iconTint = MaterialTheme.colorScheme.primary,
                                     modifier = Modifier
-                                        .size(46.dp)
+                                        .size(48.dp)
                                         .clip(RoundedCornerShape(10.dp))
-                                        .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Icon(
-                                        imageVector = when {
-                                            isAudio -> Icons.Default.MusicNote
-                                            isFile -> Icons.Default.Description
-                                            else -> Icons.Default.Movie
-                                        },
-                                        contentDescription = null,
-                                        tint = MaterialTheme.colorScheme.primary,
-                                        modifier = Modifier.size(24.dp)
-                                    )
-                                }
+                                        .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.15f))
+                                )
 
                                 Spacer(modifier = Modifier.width(12.dp))
 
@@ -236,7 +230,11 @@ fun DetectedMediaSheet(
                                         Spacer(modifier = Modifier.width(8.dp))
 
                                         Text(
-                                            text = AppDownloadManager.formatBytes(media.estimatedBytes),
+                                            text = if (media.estimatedBytes > 0) {
+                                                AppDownloadManager.formatBytes(media.estimatedBytes)
+                                            } else {
+                                                "~ size"
+                                            },
                                             style = MaterialTheme.typography.labelSmall,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant
                                         )

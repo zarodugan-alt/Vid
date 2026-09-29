@@ -52,7 +52,8 @@ class Converters {
         BrowserHistory::class
     ],
     // v2 adds engine/formatSelector/sourcePageUrl to download_tasks.
-    version = 2,
+    // v3 adds referer to download_tasks.
+    version = 3,
     exportSchema = false
 )
 @TypeConverters(Converters::class)

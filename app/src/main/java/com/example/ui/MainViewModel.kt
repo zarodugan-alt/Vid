@@ -19,6 +19,9 @@ import com.example.data.model.VideoInfo
 import com.example.data.repository.BrowserRepository
 import com.example.data.repository.DownloadRepository
 import com.example.download.AppDownloadManager
+import com.example.download.LinkPreviewFetcher
+import com.example.download.MediaProbe
+import com.example.download.PageMediaHints
 import com.example.download.VideoExtractor
 import com.example.download.YtDlpEngine
 import com.example.ui.navigation.Screen
@@ -28,8 +31,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import java.io.File
-import java.util.UUID
 
 enum class LibrarySortBy {
     DATE_DESC,
@@ -180,7 +181,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             mediaType = mediaType,
             engine = option.engine,
             formatSelector = option.formatSelector,
-            sourcePageUrl = option.sourcePageUrl ?: info.sourceUrl
+            sourcePageUrl = option.sourcePageUrl ?: info.sourceUrl,
+            referer = option.sourcePageUrl ?: info.sourceUrl
         )
 
         // Navigate to Downloading Screen so user immediately sees active progress!
@@ -276,6 +278,32 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 browserRepository.recordHistory(title ?: url, url)
             }
         }
+
+        // If this page is a known video page (e.g. YouTube video/shorts, TikTok video, Instagram reel),
+        // add a verified on-device yt-dlp entry right away.
+        if (PageMediaHints.isSupportedMediaPage(url)) {
+            viewModelScope.launch {
+                val hostLabel = PageMediaHints.sourceLabel(url)
+                val cleanTitle = title?.takeIf { it.isNotBlank() && it != "Web Page" } ?: "$hostLabel Video"
+                val preview = LinkPreviewFetcher.instant(url) ?: LinkPreviewFetcher.fetch(url)
+                val item = DetectedMedia(
+                    url = url,
+                    title = preview?.title ?: cleanTitle,
+                    mimeType = "video/mp4",
+                    quality = "HD (yt-dlp)",
+                    estimatedBytes = 0L,
+                    thumbnailUrl = preview?.thumbnailUrl,
+                    sourcePageUrl = url,
+                    mediaType = MediaType.VIDEO,
+                    fileName = "$cleanTitle.mp4",
+                    requiresYtDlp = true
+                )
+                val current = _detectedMediaList.value
+                if (!current.any { it.url == url }) {
+                    _detectedMediaList.value = listOf(item) + current
+                }
+            }
+        }
     }
 
     fun onWebProgressChanged(newProgress: Int) {
@@ -319,101 +347,68 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     ) {
         if (url.isBlank()) return
         if (url.startsWith("data:") || url.startsWith("javascript:") || url.startsWith("about:")) return
-        val lowerUrl = url.lowercase()
-        // Skip common ad networks or tracking pixels
-        if (lowerUrl.contains("googleads") || lowerUrl.contains("doubleclick") ||
-            lowerUrl.contains("analytics") || lowerUrl.contains("facebook.com/tr")
-        ) return
+        if (MediaProbe.looksBlocked(url)) return
 
         val current = _detectedMediaList.value
         if (current.any { it.url == url }) return // already detected
 
-        val detectedExt = when {
-            url.substringBefore("?").contains(".") -> url.substringBefore("?").substringAfterLast(".").lowercase()
-            mimeType.contains("mp3") || mimeType.contains("mpeg") -> "mp3"
-            mimeType.contains("webm") -> "webm"
-            mimeType.contains("pdf") -> "pdf"
-            mimeType.contains("apk") -> "apk"
-            mimeType.contains("zip") -> "zip"
-            mimeType.contains("audio") -> "mp3"
-            else -> "mp4"
-        }
+        val currentPage = _browserUrlInput.value
 
-        val rawName = title ?: url.substringAfterLast("/").substringBefore("?").ifBlank { "Media_${System.currentTimeMillis() % 10000}" }
-        val cleanTitle = if (rawName.isBlank() || rawName == "null") "download_$detectedExt" else rawName
+        viewModelScope.launch {
+            // Real HTTP verification: HEAD/GET request ensures only real media is listed
+            val probed = MediaProbe.probe(url, currentPage) ?: return@launch
 
-        val isAudio = mimeType.contains("audio") || detectedExt in listOf("mp3", "m4a", "wav", "aac", "ogg")
-        val isDoc = detectedExt in listOf("pdf", "doc", "docx", "xls", "xlsx", "zip", "rar", "7z", "apk", "tar", "gz")
-        val isVideo = mimeType.contains("video") || detectedExt in listOf("mp4", "webm", "mkv", "mov", "flv", "m3u8", "ts")
+            val cleanTitle = title?.takeIf {
+                it.isNotBlank() && it != "null" && it != "Web Video" && it != "File" && it != "Playing Media"
+            } ?: probed.fileName
 
-        val quality = when {
-            url.contains("1080") -> "1080p FHD"
-            url.contains("720") -> "720p HD"
-            url.contains("480") -> "480p SD"
-            isAudio -> "Audio ($detectedExt)"
-            isDoc -> "${detectedExt.uppercase()} File"
-            else -> if (isVideo) "HD Video" else "File"
-        }
+            val qualityLabel = when (probed.mediaType) {
+                MediaType.AUDIO -> "Audio (${probed.extension.uppercase()})"
+                MediaType.DOCUMENT -> "${probed.extension.uppercase()} File"
+                MediaType.IMAGE -> "Image (${probed.extension.uppercase()})"
+                else -> if (probed.isStreamManifest) "HD Stream" else "Video (${probed.extension.uppercase()})"
+            }
 
-        val estimatedBytes = if (contentLength > 0L) {
-            contentLength
-        } else {
-            when {
-                url.contains("1080") -> 52_000_000L
-                url.contains("720") -> 28_000_000L
-                url.contains("480") -> 14_000_000L
-                isAudio -> 4_500_000L
-                isDoc -> 6_000_000L
-                else -> 22_000_000L
+            val item = DetectedMedia(
+                url = probed.url,
+                title = cleanTitle,
+                mimeType = probed.mimeType,
+                quality = qualityLabel,
+                estimatedBytes = probed.contentLength,
+                thumbnailUrl = if (probed.mediaType == MediaType.IMAGE) probed.url else null,
+                sourcePageUrl = currentPage,
+                mediaType = probed.mediaType,
+                fileName = probed.fileName,
+                requiresYtDlp = probed.isStreamManifest
+            )
+
+            val updated = _detectedMediaList.value
+            if (!updated.any { it.url == item.url }) {
+                _detectedMediaList.value = updated + item
             }
         }
-
-        val item = DetectedMedia(
-            url = url,
-            title = cleanTitle,
-            mimeType = mimeType,
-            quality = quality,
-            estimatedBytes = estimatedBytes,
-            sourcePageUrl = _browserUrlInput.value
-        )
-        _detectedMediaList.value = current + item
     }
 
     fun downloadDetectedMedia(media: DetectedMedia) {
         _showDetectedMediaSheet.value = false
-        val ext = when {
-            media.url.substringBefore("?").contains(".") -> media.url.substringBefore("?").substringAfterLast(".").lowercase()
-            media.mimeType.contains("audio") || media.mimeType.contains("mp3") -> "mp3"
-            media.mimeType.contains("pdf") -> "pdf"
-            media.mimeType.contains("apk") -> "apk"
-            media.mimeType.contains("zip") -> "zip"
-            else -> "mp4"
-        }
 
-        val resolvedMediaType = when (ext) {
-            "mp3", "m4a", "wav", "aac", "ogg" -> MediaType.AUDIO
-            "mp4", "webm", "mkv", "mov", "flv", "3gp", "ts" -> MediaType.VIDEO
-            "pdf", "doc", "docx", "xls", "xlsx", "zip", "rar", "7z", "apk" -> MediaType.DOCUMENT
-            "jpg", "jpeg", "png", "webp", "gif" -> MediaType.IMAGE
-            else -> if (media.mimeType.contains("audio")) MediaType.AUDIO else if (media.mimeType.contains("video")) MediaType.VIDEO else MediaType.OTHER
-        }
-
-        // HLS/DASH manifests are playlists, not media: fetching them over plain HTTP
-        // just saves a text file. yt-dlp downloads every segment and muxes them.
-        val isStreamManifest = ext == "m3u8" || ext == "mpd"
+        val engine = if (media.requiresYtDlp) DownloadEngine.YTDLP else DownloadEngine.HTTP
+        val format = media.fileName.substringAfterLast('.', "").uppercase().ifBlank { "MP4" }
+        val formatSelector = if (media.requiresYtDlp) "bestvideo*+bestaudio/best" else null
 
         downloadManager.startDownload(
             url = media.url,
             title = media.title,
             quality = media.quality,
-            format = if (isStreamManifest) "MP4" else ext.uppercase(),
-            estimatedBytes = if (isStreamManifest) 0L else media.estimatedBytes,
+            format = format,
+            estimatedBytes = media.estimatedBytes,
             thumbnailUrl = media.thumbnailUrl,
-            mediaType = if (isStreamManifest) MediaType.VIDEO else resolvedMediaType,
-            explicitMimeType = if (isStreamManifest) "video/mp4" else media.mimeType,
-            engine = if (isStreamManifest) DownloadEngine.YTDLP else DownloadEngine.HTTP,
-            formatSelector = if (isStreamManifest) "bestvideo*+bestaudio/best" else null,
-            sourcePageUrl = if (isStreamManifest) media.url else null
+            mediaType = media.mediaType,
+            explicitMimeType = media.mimeType,
+            engine = engine,
+            formatSelector = formatSelector,
+            sourcePageUrl = if (media.requiresYtDlp) media.url else media.sourcePageUrl,
+            referer = media.sourcePageUrl
         )
         navigateTo(Screen.DOWNLOADING)
     }

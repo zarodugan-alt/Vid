@@ -67,7 +67,8 @@ class AppDownloadManager(
         explicitMimeType: String? = null,
         engine: DownloadEngine = DownloadEngine.HTTP,
         formatSelector: String? = null,
-        sourcePageUrl: String? = null
+        sourcePageUrl: String? = null,
+        referer: String? = null
     ): String {
         // Resolve extension cleanly from format, title, or url
         val cleanFormat = format.trim().lowercase()
@@ -104,7 +105,8 @@ class AppDownloadManager(
             mediaType = resolvedMediaType,
             engine = engine,
             formatSelector = formatSelector,
-            sourcePageUrl = sourcePageUrl
+            sourcePageUrl = sourcePageUrl,
+            referer = referer
         )
 
         scope.launch {
@@ -304,11 +306,14 @@ class AppDownloadManager(
         result.onSuccess { file ->
             val extension = file.extension.lowercase()
             val mediaType = if (isAudio) MediaType.AUDIO else mediaTypeFor(extension)
+            val localThumbnail = MediaThumbnails.create(context, file, mediaType)
+            val finalThumbnail = localThumbnail ?: task.thumbnailUrl
             withContext(NonCancellable) {
                 downloadDao.update(
                     task.copy(
                         fileName = file.name,
                         filePath = file.absolutePath,
+                        thumbnailUrl = finalThumbnail,
                         mimeType = mimeTypeFor(extension, mediaType),
                         mediaType = mediaType,
                         status = DownloadStatus.COMPLETED,
@@ -359,6 +364,10 @@ class AppDownloadManager(
             val requestBuilder = Request.Builder()
                 .url(currentTask.url)
                 .header("User-Agent", VideoExtractor.USER_AGENT)
+
+            currentTask.referer?.takeIf { it.isNotBlank() }?.let {
+                requestBuilder.header("Referer", it)
+            }
 
             if (existingLength > 0) {
                 requestBuilder.header("Range", "bytes=$existingLength-")
@@ -467,6 +476,8 @@ class AppDownloadManager(
 
     private suspend fun completeDownload(task: DownloadTask, file: File) {
         val finalSize = file.length()
+        val localThumbnail = MediaThumbnails.create(context, file, task.mediaType)
+        val finalThumbnail = localThumbnail ?: task.thumbnailUrl
         withContext(NonCancellable) {
             downloadDao.update(
                 task.copy(
@@ -474,6 +485,7 @@ class AppDownloadManager(
                     downloadedBytes = finalSize,
                     totalBytes = finalSize,
                     filePath = file.absolutePath,
+                    thumbnailUrl = finalThumbnail,
                     speedBytesPerSec = 0L,
                     etaSeconds = 0L,
                     completedAt = System.currentTimeMillis()

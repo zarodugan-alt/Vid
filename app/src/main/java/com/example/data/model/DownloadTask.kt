@@ -30,7 +30,9 @@ data class DownloadTask(
     val formatSelector: String? = null,
     /** Page the media came from; yt-dlp re-resolves it at download time so that
      * expiring CDN links never break a queued or paused download. */
-    val sourcePageUrl: String? = null
+    val sourcePageUrl: String? = null,
+    /** Sent as `Referer`; many CDNs answer 403 to requests without it. */
+    val referer: String? = null
 ) {
     val progress: Float
         get() = if (totalBytes > 0) (downloadedBytes.toFloat() / totalBytes.toFloat()).coerceIn(0f, 1f) else 0f

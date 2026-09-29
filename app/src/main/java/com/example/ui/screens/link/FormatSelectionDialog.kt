@@ -39,7 +39,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
+import androidx.compose.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -52,6 +52,7 @@ import com.example.data.model.DownloadEngine
 import com.example.data.model.ExtractedVideoOption
 import com.example.data.model.VideoInfo
 import com.example.download.AppDownloadManager
+import com.example.ui.components.MediaThumbnail
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -124,20 +125,15 @@ fun FormatSelectionDialog(
                     .padding(12.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Box(
+                MediaThumbnail(
+                    model = videoInfo.thumbnailUrl,
+                    fallbackIcon = Icons.Default.Movie,
+                    iconTint = MaterialTheme.colorScheme.primary,
                     modifier = Modifier
-                        .size(54.dp)
+                        .size(64.dp)
                         .clip(RoundedCornerShape(8.dp))
-                        .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Movie,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(28.dp)
-                    )
-                }
+                        .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.2f))
+                )
 
                 Spacer(modifier = Modifier.width(12.dp))
 

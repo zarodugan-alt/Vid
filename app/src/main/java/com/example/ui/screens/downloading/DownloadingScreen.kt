@@ -62,6 +62,7 @@ import com.example.data.model.DownloadStatus
 import com.example.data.model.DownloadTask
 import com.example.data.model.MediaType
 import com.example.download.AppDownloadManager
+import com.example.ui.components.MediaThumbnail
 import com.example.ui.MainViewModel
 import com.example.ui.navigation.Screen
 
@@ -330,9 +331,17 @@ fun DownloadTaskCard(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Box(
+                MediaThumbnail(
+                    model = task.thumbnailUrl,
+                    fallbackIcon = if (isAudio) Icons.Default.MusicNote else Icons.Default.Movie,
+                    iconTint = when (task.status) {
+                        DownloadStatus.DOWNLOADING -> MaterialTheme.colorScheme.primary
+                        DownloadStatus.PAUSED -> Color(0xFFFFB300)
+                        DownloadStatus.FAILED -> MaterialTheme.colorScheme.error
+                        else -> MaterialTheme.colorScheme.onSurfaceVariant
+                    },
                     modifier = Modifier
-                        .size(44.dp)
+                        .size(48.dp)
                         .clip(RoundedCornerShape(10.dp))
                         .background(
                             when (task.status) {
@@ -341,21 +350,8 @@ fun DownloadTaskCard(
                                 DownloadStatus.FAILED -> MaterialTheme.colorScheme.error.copy(alpha = 0.15f)
                                 else -> MaterialTheme.colorScheme.surfaceVariant
                             }
-                        ),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = if (isAudio) Icons.Default.MusicNote else Icons.Default.Movie,
-                        contentDescription = null,
-                        tint = when (task.status) {
-                            DownloadStatus.DOWNLOADING -> MaterialTheme.colorScheme.primary
-                            DownloadStatus.PAUSED -> Color(0xFFFFB300)
-                            DownloadStatus.FAILED -> MaterialTheme.colorScheme.error
-                            else -> MaterialTheme.colorScheme.onSurfaceVariant
-                        },
-                        modifier = Modifier.size(22.dp)
-                    )
-                }
+                        )
+                )
 
                 Spacer(modifier = Modifier.width(12.dp))
 

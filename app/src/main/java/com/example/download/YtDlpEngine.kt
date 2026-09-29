@@ -18,6 +18,8 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicBoolean
 import com.yausername.youtubedl_android.mapper.VideoInfo as YtDlpVideoInfo
 
 /**
@@ -54,6 +56,21 @@ object YtDlpEngine {
 
     val isReady: Boolean get() = _status.value is Status.Ready
 
+    /** yt-dlp writes the decoded player JS here; reusing it saves seconds per call. */
+    @Volatile
+    private var cacheDirPath: String? = null
+
+    private class CachedInfo(val info: VideoInfo, val createdAt: Long)
+
+    private val infoCache = ConcurrentHashMap<String, CachedInfo>()
+
+    private val selfHealAttempted = AtomicBoolean(false)
+
+    /** Extraction results stay valid for a few minutes, which makes a second
+     * analyze of the same link instant. Stream URLs are resolved again at
+     * download time anyway, so nothing can expire in between. */
+    private const val INFO_TTL_MS = 10 * 60 * 1000L
+
     /**
      * Unpacks and initialises the engine. Safe to call from anywhere and as often
      * as you like: the work happens once, later callers just await the result.
@@ -67,6 +84,7 @@ object YtDlpEngine {
             withContext(Dispatchers.IO) {
                 try {
                     YoutubeDL.getInstance().init(appContext)
+                    cacheDirPath = File(appContext.cacheDir, "ytdlp_cache").apply { mkdirs() }.absolutePath
                     // ffmpeg is optional for progressive streams but required to mux
                     // the separate video/audio tracks that carry anything above 720p.
                     runCatching { FFmpeg.getInstance().init(appContext) }
@@ -93,6 +111,11 @@ object YtDlpEngine {
 
     /** Runs `yt-dlp --dump-json` and maps the result onto the app's own model. */
     suspend fun fetchInfo(context: Context, url: String): Result<VideoInfo> {
+        val cached = infoCache[url]
+        if (cached != null && System.currentTimeMillis() - cached.createdAt < INFO_TTL_MS) {
+            return Result.success(cached.info)
+        }
+
         if (!ensureReady(context)) {
             return Result.failure(IllegalStateException(unavailableReason()))
         }
@@ -101,10 +124,33 @@ object YtDlpEngine {
                 val request = YoutubeDLRequest(url)
                     .addOption("--no-playlist")
                     .addOption("--no-warnings")
-                    .addOption("--socket-timeout", 30)
-                val info = YoutubeDL.getInstance().getInfo(request)
-                toVideoInfo(info, url)
-            }.recoverCatching { throw IllegalStateException(friendlyError(it), it) }
+                    .addOption("--socket-timeout", 20)
+                    .addOption("--extractor-args", "youtube:player_client=android,web;player_skip=configs")
+
+                cacheDirPath?.let { request.addOption("--cache-dir", it) }
+
+                val rawInfo = YoutubeDL.getInstance().getInfo(request)
+                val mapped = toVideoInfo(rawInfo, url)
+                infoCache[url] = CachedInfo(mapped, System.currentTimeMillis())
+                mapped
+            }.recoverCatching { firstError ->
+                // If YouTube extraction failed on an outdated binary, self-update once and retry
+                if (url.contains("youtu") && !selfHealAttempted.getAndSet(true)) {
+                    Log.i(TAG, "Extraction failed, attempting automatic yt-dlp update...")
+                    runCatching { update(context) }
+                    val retryReq = YoutubeDLRequest(url)
+                        .addOption("--no-playlist")
+                        .addOption("--no-warnings")
+                        .addOption("--socket-timeout", 25)
+                    cacheDirPath?.let { retryReq.addOption("--cache-dir", it) }
+                    val retryInfo = YoutubeDL.getInstance().getInfo(retryReq)
+                    val mapped = toVideoInfo(retryInfo, url)
+                    infoCache[url] = CachedInfo(mapped, System.currentTimeMillis())
+                    mapped
+                } else {
+                    throw IllegalStateException(friendlyError(firstError), firstError)
+                }
+            }
         }
     }
 
@@ -138,9 +184,15 @@ object YtDlpEngine {
                     .addOption("--retries", 5)
                     .addOption("--socket-timeout", 30)
                     .addOption("--continue")
+                    .addOption("--extractor-args", "youtube:player_client=android,web")
                     .addOption("-o", File(outputDir, "$outputBaseName.%(ext)s").absolutePath)
 
-                if (!formatSelector.isNullOrBlank()) request.addOption("-f", formatSelector)
+                cacheDirPath?.let { request.addOption("--cache-dir", it) }
+
+                if (!formatSelector.isNullOrBlank()) {
+                    // Fall back to best if the strict selector fails to match
+                    request.addOption("-f", "$formatSelector/best")
+                }
 
                 if (!audioFormat.isNullOrBlank()) {
                     request.addOption("-x").addOption("--audio-format", audioFormat)
@@ -158,7 +210,9 @@ object YtDlpEngine {
                     preferredExtension = audioFormat?.takeIf { it.isNotBlank() }
                         ?: mergeContainer?.takeIf { it.isNotBlank() }
                 ) ?: error("yt-dlp finished but produced no output file")
-            }.recoverCatching { throw IllegalStateException(friendlyError(it), it) }
+            }.recoverCatching { error ->
+                throw IllegalStateException(friendlyError(error), error)
+            }
         }
     }
 
@@ -253,7 +307,8 @@ object YtDlpEngine {
                 ?: info.fulltitle?.takeIf { it.isNotBlank() }
                 ?: "Downloaded media",
             sourceUrl = pageUrl,
-            thumbnailUrl = info.thumbnail?.takeIf { it.isNotBlank() },
+            thumbnailUrl = info.thumbnail?.takeIf { it.isNotBlank() }
+                ?: LinkPreviewFetcher.instant(sourceUrl)?.thumbnailUrl,
             durationSeconds = duration,
             author = info.uploader?.takeIf { it.isNotBlank() },
             options = buildOptions(formats, duration, pageUrl)
