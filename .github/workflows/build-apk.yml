@@ -42,8 +42,9 @@ jobs:
 
       - name: Build debug APK
         env:
-          # Optional. If unset, social URLs fail clearly and direct media URLs
-          # remain available. Configure this repository variable for yt-dlp.
+          # Optional fallback only: extraction normally runs on the bundled
+          # on-device yt-dlp engine. This service is used when that engine cannot
+          # start (unsupported ABI). Unset is fine.
           YTDLP_API_URL: ${{ vars.YTDLP_API_URL }}
         run: gradle --no-daemon --stacktrace :app:assembleDebug
 
