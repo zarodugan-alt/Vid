@@ -11,6 +11,7 @@ import java.net.URI
 import java.util.concurrent.TimeUnit
 
 class VideoExtractor(
+    private val ytDlp: YtDlpExtractor = YtDlpExtractor(),
     private val client: OkHttpClient = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(20, TimeUnit.SECONDS)
@@ -30,20 +31,13 @@ class VideoExtractor(
             val host = uri.host?.lowercase() ?: ""
 
             when {
-                host.contains("youtube.com") || host.contains("youtu.be") -> {
-                    Result.success(createSocialVideoInfo("YouTube", normalizedUrl, "Trending Video"))
-                }
-                host.contains("tiktok.com") -> {
-                    Result.success(createSocialVideoInfo("TikTok", normalizedUrl, "TikTok Viral Clip"))
-                }
-                host.contains("instagram.com") -> {
-                    Result.success(createSocialVideoInfo("Instagram", normalizedUrl, "Instagram Reel"))
-                }
-                host.contains("twitter.com") || host.contains("x.com") -> {
-                    Result.success(createSocialVideoInfo("X / Twitter", normalizedUrl, "X Video Post"))
-                }
-                host.contains("facebook.com") || host.contains("fb.watch") -> {
-                    Result.success(createSocialVideoInfo("Facebook", normalizedUrl, "Facebook Watch Video"))
+                // A web page URL is not a media URL. Never return a fabricated stream here:
+                // doing so makes the UI look successful while downloading unrelated content.
+                host.contains("youtube.com") || host.contains("youtu.be") ||
+                    host.contains("tiktok.com") || host.contains("instagram.com") ||
+                    host.contains("twitter.com") || host.contains("x.com") ||
+                    host.contains("facebook.com") || host.contains("fb.watch") -> {
+                    ytDlp.extract(normalizedUrl)
                 }
                 else -> {
                     // Inspect direct URL via HEAD/GET request
@@ -83,7 +77,9 @@ class VideoExtractor(
                 .ifBlank { "Downloaded Media" }
             val cleanTitle = if (title.length > 50) title.take(50) + "..." else title
 
-            val baseSize = if (contentLength > 0) contentLength else 28_500_000L
+            // Unknown length must remain unknown. A made-up size produces incorrect progress,
+            // ETA and completion state in the download UI.
+            val baseSize = contentLength
 
             val isAudio = contentType.contains("audio") || url.endsWith(".mp3", ignoreCase = true)
 
@@ -147,52 +143,6 @@ class VideoExtractor(
         } catch (e: Exception) {
             Result.failure(e)
         }
-    }
-
-    private fun createSocialVideoInfo(platform: String, url: String, defaultTitle: String): VideoInfo {
-        val sampleStreams = listOf(
-            "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4",
-            "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4",
-            "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4"
-        )
-        // Pick one reliably based on url hash
-        val streamUrl = sampleStreams[Math.abs(url.hashCode()) % sampleStreams.size]
-        val durationSecs = 142L
-
-        return VideoInfo(
-            title = "$platform - $defaultTitle",
-            sourceUrl = url,
-            thumbnailUrl = "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=600&auto=format&fit=crop&q=80",
-            durationSeconds = durationSecs,
-            author = "$platform Creator",
-            options = listOf(
-                ExtractedVideoOption(
-                    qualityLabel = "1080p FHD (High Quality)",
-                    format = "MP4",
-                    estimatedBytes = 48_500_000L,
-                    downloadUrl = streamUrl
-                ),
-                ExtractedVideoOption(
-                    qualityLabel = "720p HD (Recommended)",
-                    format = "MP4",
-                    estimatedBytes = 24_200_000L,
-                    downloadUrl = streamUrl
-                ),
-                ExtractedVideoOption(
-                    qualityLabel = "480p SD (Data Saver)",
-                    format = "MP4",
-                    estimatedBytes = 11_800_000L,
-                    downloadUrl = streamUrl
-                ),
-                ExtractedVideoOption(
-                    qualityLabel = "Audio Only (320kbps MP3)",
-                    format = "MP3",
-                    estimatedBytes = 4_600_000L,
-                    downloadUrl = streamUrl,
-                    isAudioOnly = true
-                )
-            )
-        )
     }
 
     companion object {
