@@ -2,6 +2,8 @@ package com.example.download
 
 import android.content.Context
 import android.os.Environment
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import com.example.data.db.DownloadDao
 import com.example.data.model.DownloadStatus
 import com.example.data.model.DownloadTask
@@ -228,6 +230,10 @@ class AppDownloadManager(
 
     private suspend fun executeDownload(initialTask: DownloadTask) {
         var currentTask = initialTask
+        if (isWifiOnly && !isOnWifi()) {
+            downloadDao.update(currentTask.copy(status = DownloadStatus.PAUSED, errorMessage = "Waiting for Wi-Fi"))
+            return
+        }
         val destinationFile = File(currentTask.filePath ?: File(getDownloadsDirectory(), currentTask.fileName).absolutePath)
         val existingLength = if (destinationFile.exists()) destinationFile.length() else 0L
 
@@ -248,8 +254,7 @@ class AppDownloadManager(
             }
 
             val request = requestBuilder.build()
-            val response = client.newCall(request).execute()
-
+            client.newCall(request).execute().use { response ->
             if (!response.isSuccessful && response.code != 206 && response.code != 200) {
                 // If server doesn't support Range or failed, fallback to 0 or error
                 if (response.code == 416) {
@@ -260,6 +265,9 @@ class AppDownloadManager(
                 throw IllegalStateException("HTTP server error code: ${response.code}")
             }
 
+            // Servers are allowed to ignore Range and return 200. Appending in that case
+            // corrupts the file, so restart from byte zero.
+            val resumeAccepted = existingLength > 0 && response.code == 206
             val body = response.body ?: throw IllegalStateException("Empty response body from server")
             val serverLength = body.contentLength()
             val totalBytes = if (serverLength > 0) {
@@ -267,13 +275,13 @@ class AppDownloadManager(
             } else if (currentTask.totalBytes > 0) {
                 currentTask.totalBytes
             } else {
-                35_000_000L
+                0L
             }
 
             downloadDao.update(currentTask.copy(totalBytes = totalBytes))
 
             val inputStream: InputStream = body.byteStream()
-            val outputStream = if (existingLength > 0 && response.code == 206) {
+            val outputStream = if (resumeAccepted) {
                 FileOutputStream(destinationFile, true)
             } else {
                 FileOutputStream(destinationFile, false)
@@ -281,7 +289,7 @@ class AppDownloadManager(
 
             val buffer = ByteArray(16 * 1024)
             var bytesRead: Int
-            var totalDownloaded = if (response.code == 206) existingLength else 0L
+            var totalDownloaded = if (resumeAccepted) existingLength else 0L
 
             var lastUpdateTime = System.currentTimeMillis()
             var bytesSinceLastUpdate = 0L
@@ -318,7 +326,7 @@ class AppDownloadManager(
             }
 
             completeDownload(currentTask.copy(totalBytes = totalDownloaded), destinationFile)
-
+            }
         } catch (e: Exception) {
             if (activeJobs[currentTask.id]?.isCancelled == true) {
                 // Was paused or cancelled intentionally
@@ -337,6 +345,15 @@ class AppDownloadManager(
             activeJobs.remove(currentTask.id)
             checkAndScheduleQueue()
         }
+    }
+
+    private fun isOnWifi(): Boolean {
+        val connectivity = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager
+            ?: return false
+        val network = connectivity.activeNetwork ?: return false
+        val capabilities = connectivity.getNetworkCapabilities(network) ?: return false
+        return capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) ||
+            capabilities.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)
     }
 
     private suspend fun completeDownload(task: DownloadTask, file: File) {

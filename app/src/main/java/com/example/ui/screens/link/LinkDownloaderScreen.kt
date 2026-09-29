@@ -68,7 +68,6 @@ import com.example.ui.navigation.Screen
 data class SupportedPlatform(
     val name: String,
     val color: Color,
-    val sampleUrl: String,
     val icon: ImageVector
 )
 
@@ -89,12 +88,12 @@ fun LinkDownloaderScreen(
     }
 
     val platforms = listOf(
-        SupportedPlatform("YouTube", Color(0xFFFF0000), "https://www.youtube.com/watch?v=aqz-KE-bpKQ", Icons.Default.PlayCircle),
-        SupportedPlatform("TikTok", Color(0xFF00F2FE), "https://www.tiktok.com/@video/sample", Icons.Default.Public),
-        SupportedPlatform("Instagram", Color(0xFFE1306C), "https://www.instagram.com/reel/sample", Icons.Default.Share),
-        SupportedPlatform("Twitter / X", Color(0xFF1DA1F2), "https://twitter.com/video/sample", Icons.Default.Public),
-        SupportedPlatform("Facebook", Color(0xFF1877F2), "https://www.facebook.com/watch?v=sample", Icons.Default.Public),
-        SupportedPlatform("Direct MP4", Color(0xFF00E5FF), "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4", Icons.Default.Link)
+        SupportedPlatform("YouTube", Color(0xFFFF0000), Icons.Default.PlayCircle),
+        SupportedPlatform("TikTok", Color(0xFF00F2FE), Icons.Default.Public),
+        SupportedPlatform("Instagram", Color(0xFFE1306C), Icons.Default.Share),
+        SupportedPlatform("Twitter / X", Color(0xFF1DA1F2), Icons.Default.Public),
+        SupportedPlatform("Facebook", Color(0xFF1877F2), Icons.Default.Public),
+        SupportedPlatform("Direct media URL", Color(0xFF00E5FF), Icons.Default.Link)
     )
 
     Box(
@@ -357,8 +356,8 @@ fun LinkDownloaderScreen(
                                 RoundedCornerShape(14.dp)
                             )
                             .clickable {
-                                viewModel.updateLinkInput(platform.sampleUrl)
-                                viewModel.analyzeLink(platform.sampleUrl)
+                                // Platform shortcut only selects the platform; the user supplies the real URL.
+                                viewModel.updateLinkInput("")
                             }
                             .padding(horizontal = 14.dp, vertical = 10.dp)
                             .testTag("platform_chip_${platform.name.lowercase().replace(" ", "_")}"),

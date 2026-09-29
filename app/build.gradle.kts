@@ -18,6 +18,8 @@ android {
     targetSdk = 36
     versionCode = 1
     versionName = "1.0"
+    // Optional HTTPS yt-dlp service. The APK never embeds credentials.
+    buildConfigField("String", "YTDLP_API_URL", "\"${System.getenv("YTDLP_API_URL") ?: ""}\"")
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
