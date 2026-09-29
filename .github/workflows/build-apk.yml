@@ -27,11 +27,18 @@ jobs:
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          # The legacy "tools" package was removed from the SDK repository, and the
+          # action's historical default (`tools platform-tools`) makes sdkmanager
+          # fail with "Failed to find package 'tools'". Only ask for what we need.
+          packages: platform-tools
 
       - name: Install Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: "8.13"
+          # AGP 9.1.x requires Gradle 9.3.1+; keep this in sync with
+          # gradle/wrapper/gradle-wrapper.properties.
+          gradle-version: "9.3.1"
 
       - name: Build debug APK
         env:
