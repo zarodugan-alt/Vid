@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <!-- context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) -->
+    <external-files-path
+        name="external_downloads"
+        path="Download/" />
+    <!-- Fallback used when no external storage is available -->
+    <files-path
+        name="internal_downloads"
+        path="downloads/" />
+</paths>

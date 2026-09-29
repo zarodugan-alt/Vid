@@ -10,6 +10,7 @@ import com.example.data.model.BrowserBookmark
 import com.example.data.model.BrowserHistory
 import com.example.data.model.BrowserTab
 import com.example.data.model.DetectedMedia
+import com.example.data.model.DownloadEngine
 import com.example.data.model.DownloadStatus
 import com.example.data.model.DownloadTask
 import com.example.data.model.ExtractedVideoOption
@@ -397,15 +398,22 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             else -> if (media.mimeType.contains("audio")) MediaType.AUDIO else if (media.mimeType.contains("video")) MediaType.VIDEO else MediaType.OTHER
         }
 
+        // HLS/DASH manifests are playlists, not media: fetching them over plain HTTP
+        // just saves a text file. yt-dlp downloads every segment and muxes them.
+        val isStreamManifest = ext == "m3u8" || ext == "mpd"
+
         downloadManager.startDownload(
             url = media.url,
             title = media.title,
             quality = media.quality,
-            format = ext.uppercase(),
-            estimatedBytes = media.estimatedBytes,
+            format = if (isStreamManifest) "MP4" else ext.uppercase(),
+            estimatedBytes = if (isStreamManifest) 0L else media.estimatedBytes,
             thumbnailUrl = media.thumbnailUrl,
-            mediaType = resolvedMediaType,
-            explicitMimeType = media.mimeType
+            mediaType = if (isStreamManifest) MediaType.VIDEO else resolvedMediaType,
+            explicitMimeType = if (isStreamManifest) "video/mp4" else media.mimeType,
+            engine = if (isStreamManifest) DownloadEngine.YTDLP else DownloadEngine.HTTP,
+            formatSelector = if (isStreamManifest) "bestvideo*+bestaudio/best" else null,
+            sourcePageUrl = if (isStreamManifest) media.url else null
         )
         navigateTo(Screen.DOWNLOADING)
     }

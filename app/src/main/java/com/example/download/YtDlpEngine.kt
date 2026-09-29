@@ -185,12 +185,20 @@ object YtDlpEngine {
         }
     }
 
-    /** Output files are named `<base>.<ext>`; `.part`/`.ytdl` are work in progress. */
-    private fun resolveOutput(outputDir: File, baseName: String): File? =
-        outputDir.listFiles()
+    /**
+     * Output files are named `<base>.<ext>`; `.part`/`.ytdl` are work in progress
+     * and `<base>.f137.mp4` style names are per-stream leftovers, so the merged
+     * `<base>.<ext>` file wins whenever it exists.
+     */
+    private fun resolveOutput(outputDir: File, baseName: String): File? {
+        val candidates = outputDir.listFiles()
             ?.filter { it.isFile && it.name.startsWith("$baseName.") }
             ?.filterNot { it.name.endsWith(".part") || it.name.endsWith(".ytdl") }
-            ?.maxByOrNull { it.length() }
+            ?.takeIf { it.isNotEmpty() }
+            ?: return null
+        val merged = candidates.filter { !it.name.removePrefix("$baseName.").contains('.') }
+        return (merged.takeIf { it.isNotEmpty() } ?: candidates).maxByOrNull { it.length() }
+    }
 
     /** Bytes already on disk for a task, including partial and per-stream files. */
     fun bytesOnDisk(outputDir: File, baseName: String): Long =

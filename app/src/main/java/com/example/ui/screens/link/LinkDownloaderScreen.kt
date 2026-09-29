@@ -62,6 +62,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.R
+import com.example.download.YtDlpEngine
 import com.example.ui.MainViewModel
 import com.example.ui.navigation.Screen
 
@@ -82,6 +83,7 @@ fun LinkDownloaderScreen(
     val showFormatDialog by viewModel.showFormatDialog.collectAsStateWithLifecycle()
     val errorMessage by viewModel.linkErrorMessage.collectAsStateWithLifecycle()
     val clipboardUrl by viewModel.clipboardDetectedUrl.collectAsStateWithLifecycle()
+    val ytDlpStatus by viewModel.ytDlpStatus.collectAsStateWithLifecycle()
 
     LaunchedEffect(Unit) {
         viewModel.checkClipboard()
@@ -305,6 +307,27 @@ fun LinkDownloaderScreen(
                                 Text("Download", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
                             }
                         }
+                    }
+
+                    // Engine status: initialising takes a few seconds on first launch,
+                    // and an unavailable engine limits the app to direct media links.
+                    val engineNotice = when (val status = ytDlpStatus) {
+                        YtDlpEngine.Status.Initializing, YtDlpEngine.Status.Idle ->
+                            "Starting the on-device yt-dlp engine…"
+
+                        is YtDlpEngine.Status.Unavailable ->
+                            "yt-dlp engine unavailable (${status.reason}). Direct media links still work."
+
+                        is YtDlpEngine.Status.Ready -> null
+                    }
+                    if (engineNotice != null) {
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Text(
+                            text = engineNotice,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.testTag("ytdlp_engine_notice")
+                        )
                     }
                 }
             }

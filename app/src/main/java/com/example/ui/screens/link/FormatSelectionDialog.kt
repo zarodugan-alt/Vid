@@ -48,6 +48,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.data.model.DownloadEngine
 import com.example.data.model.ExtractedVideoOption
 import com.example.data.model.VideoInfo
 import com.example.download.AppDownloadManager
@@ -228,7 +229,11 @@ fun FormatSelectionDialog(
                             fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
                         )
                         Text(
-                            text = "Format: ${option.format}",
+                            text = buildString {
+                                append("Format: ${option.format}")
+                                if (option.engine == DownloadEngine.YTDLP) append(" • yt-dlp")
+                                if (option.requiresMerge) append(" • merged with ffmpeg")
+                            },
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -241,7 +246,13 @@ fun FormatSelectionDialog(
                             .padding(horizontal = 8.dp, vertical = 4.dp)
                     ) {
                         Text(
-                            text = AppDownloadManager.formatBytes(option.estimatedBytes),
+                            // An unknown size stays unknown: a made-up number would
+                            // only produce a wrong progress bar later on.
+                            text = if (option.estimatedBytes > 0) {
+                                AppDownloadManager.formatBytes(option.estimatedBytes)
+                            } else {
+                                "~ size"
+                            },
                             style = MaterialTheme.typography.labelSmall,
                             fontWeight = FontWeight.Bold,
                             color = MaterialTheme.colorScheme.primary

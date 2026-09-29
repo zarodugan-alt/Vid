@@ -270,6 +270,9 @@ class AppDownloadManager(
             outputDir = targetDir,
             outputBaseName = baseName
         ) { percent, etaSeconds, _ ->
+            // Stop reporting as soon as the task was paused or removed, otherwise a
+            // late callback would resurrect the DOWNLOADING state.
+            if (!activeJobs.containsKey(task.id)) return@download
             val now = System.currentTimeMillis()
             if (now - lastEmit < PROGRESS_INTERVAL_MS) return@download
             lastEmit = now
