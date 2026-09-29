@@ -54,3 +54,16 @@ jobs:
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
           retention-days: 14
+
+      # Runs after the artifact upload so a test problem never hides the APK.
+      - name: Run unit tests
+        run: gradle --no-daemon --stacktrace :app:testDebugUnitTest
+
+      - name: Upload test report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-report
+          path: app/build/reports/tests/testDebugUnitTest
+          if-no-files-found: ignore
+          retention-days: 7

@@ -152,8 +152,12 @@ object YtDlpEngine {
                     onProgress(percent, eta, line)
                 }
 
-                resolveOutput(outputDir, outputBaseName)
-                    ?: error("yt-dlp finished but produced no output file")
+                resolveOutput(
+                    outputDir = outputDir,
+                    baseName = outputBaseName,
+                    preferredExtension = audioFormat?.takeIf { it.isNotBlank() }
+                        ?: mergeContainer?.takeIf { it.isNotBlank() }
+                ) ?: error("yt-dlp finished but produced no output file")
             }.recoverCatching { throw IllegalStateException(friendlyError(it), it) }
         }
     }
@@ -190,12 +194,22 @@ object YtDlpEngine {
      * and `<base>.f137.mp4` style names are per-stream leftovers, so the merged
      * `<base>.<ext>` file wins whenever it exists.
      */
-    private fun resolveOutput(outputDir: File, baseName: String): File? {
+    private fun resolveOutput(
+        outputDir: File,
+        baseName: String,
+        preferredExtension: String? = null
+    ): File? {
         val candidates = outputDir.listFiles()
             ?.filter { it.isFile && it.name.startsWith("$baseName.") }
             ?.filterNot { it.name.endsWith(".part") || it.name.endsWith(".ytdl") }
             ?.takeIf { it.isNotEmpty() }
             ?: return null
+        // The requested container wins (audio extraction may leave the source file
+        // behind), then a plain `<base>.<ext>`, then whatever is biggest.
+        preferredExtension?.let { extension ->
+            candidates.firstOrNull { it.name.equals("$baseName.$extension", ignoreCase = true) }
+                ?.let { return it }
+        }
         val merged = candidates.filter { !it.name.removePrefix("$baseName.").contains('.') }
         return (merged.takeIf { it.isNotEmpty() } ?: candidates).maxByOrNull { it.length() }
     }
