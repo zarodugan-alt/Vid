@@ -16,8 +16,17 @@ data class ExtractedVideoOption(
     val qualityLabel: String, // e.g. "1080p FHD", "720p HD", "480p SD", "Audio MP3"
     val format: String, // "MP4", "WEBM", "MP3"
     val estimatedBytes: Long,
+    /** Direct stream URL for [DownloadEngine.HTTP], or the page URL for yt-dlp. */
     val downloadUrl: String,
-    val isAudioOnly: Boolean = false
+    val isAudioOnly: Boolean = false,
+    /** Engine that has to run in order to produce this file. */
+    val engine: DownloadEngine = DownloadEngine.HTTP,
+    /** yt-dlp `-f` selector, e.g. `bestvideo[height<=1080]+bestaudio/best`. */
+    val formatSelector: String? = null,
+    /** Original page URL handed to yt-dlp. */
+    val sourcePageUrl: String? = null,
+    /** True when video and audio streams are muxed by ffmpeg after downloading. */
+    val requiresMerge: Boolean = false
 )
 
 data class VideoInfo(

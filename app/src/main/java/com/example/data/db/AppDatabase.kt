@@ -8,6 +8,7 @@ import androidx.room.TypeConverter
 import androidx.room.TypeConverters
 import com.example.data.model.BrowserBookmark
 import com.example.data.model.BrowserHistory
+import com.example.data.model.DownloadEngine
 import com.example.data.model.DownloadStatus
 import com.example.data.model.DownloadTask
 import com.example.data.model.MediaType
@@ -32,6 +33,16 @@ class Converters {
     } catch (_: Exception) {
         MediaType.VIDEO
     }
+
+    @TypeConverter
+    fun fromDownloadEngine(value: DownloadEngine): String = value.name
+
+    @TypeConverter
+    fun toDownloadEngine(value: String): DownloadEngine = try {
+        DownloadEngine.valueOf(value)
+    } catch (_: Exception) {
+        DownloadEngine.HTTP
+    }
 }
 
 @Database(
@@ -40,7 +51,8 @@ class Converters {
         BrowserBookmark::class,
         BrowserHistory::class
     ],
-    version = 1,
+    // v2 adds engine/formatSelector/sourcePageUrl to download_tasks.
+    version = 2,
     exportSchema = false
 )
 @TypeConverters(Converters::class)

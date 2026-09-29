@@ -19,6 +19,7 @@ import com.example.data.repository.BrowserRepository
 import com.example.data.repository.DownloadRepository
 import com.example.download.AppDownloadManager
 import com.example.download.VideoExtractor
+import com.example.download.YtDlpEngine
 import com.example.ui.navigation.Screen
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -44,7 +45,41 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val downloadRepository = DownloadRepository(downloadDao)
     val browserRepository = BrowserRepository(browserDao)
     val downloadManager = AppDownloadManager(application, downloadDao)
-    private val videoExtractor = VideoExtractor()
+    private val videoExtractor = VideoExtractor(application)
+
+    // yt-dlp engine -----------------------------------------------------
+    val ytDlpStatus: StateFlow<YtDlpEngine.Status> = YtDlpEngine.status
+
+    private val _isUpdatingYtDlp = MutableStateFlow(false)
+    val isUpdatingYtDlp: StateFlow<Boolean> = _isUpdatingYtDlp.asStateFlow()
+
+    private val _ytDlpMessage = MutableStateFlow<String?>(null)
+    val ytDlpMessage: StateFlow<String?> = _ytDlpMessage.asStateFlow()
+
+    init {
+        // Unpacking python/ffmpeg takes a moment on first launch; do it up front so
+        // the first paste-and-analyze does not have to wait for it.
+        viewModelScope.launch {
+            YtDlpEngine.ensureReady(application)
+        }
+    }
+
+    fun updateYtDlpEngine() {
+        if (_isUpdatingYtDlp.value) return
+        viewModelScope.launch {
+            _isUpdatingYtDlp.value = true
+            _ytDlpMessage.value = "Checking for a newer yt-dlp release…"
+            val result = YtDlpEngine.update(getApplication<Application>())
+            _isUpdatingYtDlp.value = false
+            _ytDlpMessage.value = result.getOrElse { error ->
+                "Update failed: ${error.localizedMessage ?: "unknown error"}"
+            }
+        }
+    }
+
+    fun dismissYtDlpMessage() {
+        _ytDlpMessage.value = null
+    }
 
     // Navigation
     private val _currentScreen = MutableStateFlow(Screen.LINK)
@@ -134,14 +169,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val finalTitle = customName?.ifBlank { info.title } ?: info.title
         val mediaType = if (option.isAudioOnly) MediaType.AUDIO else MediaType.VIDEO
 
-        val taskId = downloadManager.startDownload(
+        downloadManager.startDownload(
             url = option.downloadUrl,
             title = finalTitle,
             quality = option.qualityLabel,
             format = option.format,
             estimatedBytes = option.estimatedBytes,
             thumbnailUrl = info.thumbnailUrl,
-            mediaType = mediaType
+            mediaType = mediaType,
+            engine = option.engine,
+            formatSelector = option.formatSelector,
+            sourcePageUrl = option.sourcePageUrl ?: info.sourceUrl
         )
 
         // Navigate to Downloading Screen so user immediately sees active progress!
