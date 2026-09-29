@@ -2,7 +2,6 @@ package com.example.ui.screens.finished
 
 import android.content.Context
 import android.content.Intent
-import android.net.Uri
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -265,9 +264,15 @@ private fun DetailRow(label: String, value: String) {
 private fun shareDownloadedFile(context: Context, task: DownloadTask) {
     try {
         val file = task.filePath?.let { File(it) }
+        // A file:// uri triggers FileUriExposedException on API 24+, so the file has
+        // to be handed over through the app's FileProvider instead.
+        val uri = file?.takeIf { it.exists() }?.let {
+            runCatching {
+                FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", it)
+            }.getOrNull()
+        }
         val intent = Intent(Intent.ACTION_SEND).apply {
-            if (file != null && file.exists()) {
-                val uri = Uri.fromFile(file)
+            if (uri != null) {
                 type = task.mimeType
                 putExtra(Intent.EXTRA_STREAM, uri)
                 putExtra(Intent.EXTRA_SUBJECT, task.title)

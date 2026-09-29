@@ -1,20 +1,37 @@
 package com.example.download
 
+import android.content.Context
 import android.webkit.URLUtil
+import com.example.BuildConfig
+import com.example.data.model.DownloadEngine
 import com.example.data.model.ExtractedVideoOption
 import com.example.data.model.VideoInfo
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.net.URI
 import java.util.concurrent.TimeUnit
 
+/**
+ * Turns a user supplied link into a list of concrete, downloadable options.
+ *
+ * Routing:
+ *  * a URL that points straight at a media file is inspected over HTTP and kept
+ *    on the plain HTTP engine (fast, resumable);
+ *  * anything else is a web page, so the bundled yt-dlp engine resolves it;
+ *  * if the on-device engine cannot run (unsupported ABI, unpack failure) and a
+ *    `YTDLP_API_URL` service was configured at build time, that service is used
+ *    as a fallback.
+ */
 class VideoExtractor(
-    private val ytDlp: YtDlpExtractor = YtDlpExtractor(),
+    private val context: Context,
+    private val engine: YtDlpEngine = YtDlpEngine,
+    private val remote: YtDlpExtractor = YtDlpExtractor(),
     private val client: OkHttpClient = OkHttpClient.Builder()
-        .connectTimeout(15, TimeUnit.SECONDS)
-        .readTimeout(20, TimeUnit.SECONDS)
+        .connectTimeout(12, TimeUnit.SECONDS)
+        .readTimeout(15, TimeUnit.SECONDS)
         .followRedirects(true)
         .followSslRedirects(true)
         .build()
@@ -22,40 +39,80 @@ class VideoExtractor(
     suspend fun extractInfo(rawUrl: String): Result<VideoInfo> = withContext(Dispatchers.IO) {
         try {
             val url = rawUrl.trim()
-            if (!URLUtil.isValidUrl(url) && !url.startsWith("http://") && !url.startsWith("https://")) {
-                return@withContext Result.failure(IllegalArgumentException("Please enter a valid HTTP or HTTPS URL"))
+            if (url.isBlank()) {
+                return@withContext Result.failure(IllegalArgumentException("Please enter a link"))
             }
 
-            val normalizedUrl = if (!url.startsWith("http")) "https://$url" else url
-            val uri = URI(normalizedUrl)
-            val host = uri.host?.lowercase() ?: ""
-
-            when {
-                // A web page URL is not a media URL. Never return a fabricated stream here:
-                // doing so makes the UI look successful while downloading unrelated content.
-                host.contains("youtube.com") || host.contains("youtu.be") ||
-                    host.contains("tiktok.com") || host.contains("instagram.com") ||
-                    host.contains("twitter.com") || host.contains("x.com") ||
-                    host.contains("facebook.com") || host.contains("fb.watch") -> {
-                    ytDlp.extract(normalizedUrl)
-                }
-                else -> {
-                    // Inspect direct URL via HEAD/GET request
-                    inspectDirectUrl(normalizedUrl)
-                }
+            val normalizedUrl = if (!url.startsWith("http://") && !url.startsWith("https://")) {
+                "https://$url"
+            } else {
+                url
             }
+
+            if (!URLUtil.isValidUrl(normalizedUrl)) {
+                return@withContext Result.failure(
+                    IllegalArgumentException("Please enter a valid HTTP or HTTPS URL")
+                )
+            }
+
+            if (isDirectMediaUrl(normalizedUrl)) {
+                val direct = inspectDirectUrl(normalizedUrl)
+                if (direct.isSuccess) return@withContext direct
+            }
+
+            extractWithYtDlp(normalizedUrl)
         } catch (e: Exception) {
             Result.failure(e)
         }
     }
 
+    /** yt-dlp on device first, configured yt-dlp service second. */
+    private suspend fun extractWithYtDlp(url: String): Result<VideoInfo> = withContext(Dispatchers.IO) {
+        // Fast-path preview for instant poster/title while yt-dlp starts
+        val instantPreview = LinkPreviewFetcher.instant(url)
+        val previewDeferred = async { LinkPreviewFetcher.fetch(url) }
+
+        val local = engine.fetchInfo(context, url)
+        if (local.isSuccess) {
+            val info = local.getOrThrow()
+            val bestThumbnail = info.thumbnailUrl
+                ?: instantPreview?.thumbnailUrl
+                ?: previewDeferred.await()?.thumbnailUrl
+            return@withContext Result.success(info.copy(thumbnailUrl = bestThumbnail))
+        }
+
+        if (BuildConfig.YTDLP_API_URL.isNotBlank()) {
+            val fallback = remote.extract(url)
+            if (fallback.isSuccess) {
+                val info = fallback.getOrThrow()
+                val bestThumbnail = info.thumbnailUrl
+                    ?: instantPreview?.thumbnailUrl
+                    ?: previewDeferred.await()?.thumbnailUrl
+                return@withContext Result.success(info.copy(thumbnailUrl = bestThumbnail))
+            }
+        }
+
+        // Last resort: the link may still be a media file served without a
+        // recognisable extension (CDN links, signed URLs, ...).
+        val direct = inspectDirectUrl(url)
+        if (direct.isSuccess) return@withContext direct
+
+        local
+    }
+
+    private fun isDirectMediaUrl(url: String): Boolean {
+        val path = runCatching { URI(url).path }.getOrNull().orEmpty().lowercase()
+        val extension = path.substringAfterLast('.', "")
+        return extension in DIRECT_MEDIA_EXTENSIONS
+    }
+
     private suspend fun inspectDirectUrl(url: String): Result<VideoInfo> = withContext(Dispatchers.IO) {
         try {
             var contentLength = 0L
-            var contentType = "video/mp4"
+            var contentType = ""
             var fileName = URLUtil.guessFileName(url, null, null)
 
-            try {
+            runCatching {
                 val headReq = Request.Builder()
                     .url(url)
                     .head()
@@ -64,80 +121,65 @@ class VideoExtractor(
                 client.newCall(headReq).execute().use { response ->
                     if (response.isSuccessful) {
                         contentLength = response.header("Content-Length")?.toLongOrNull() ?: 0L
-                        contentType = response.header("Content-Type") ?: "video/mp4"
+                        contentType = response.header("Content-Type").orEmpty()
                         val disposition = response.header("Content-Disposition")
                         fileName = URLUtil.guessFileName(url, disposition, contentType)
                     }
                 }
-            } catch (_: Exception) {
-                // If HEAD fails, fallback to title guessing
             }
 
-            val title = fileName.substringBeforeLast(".").replace("_", " ").replace("-", " ")
-                .ifBlank { "Downloaded Media" }
-            val cleanTitle = if (title.length > 50) title.take(50) + "..." else title
-
-            // Unknown length must remain unknown. A made-up size produces incorrect progress,
-            // ETA and completion state in the download UI.
-            val baseSize = contentLength
-
-            val isAudio = contentType.contains("audio") || url.endsWith(".mp3", ignoreCase = true)
-
-            val options = if (isAudio) {
-                listOf(
-                    ExtractedVideoOption(
-                        qualityLabel = "High Quality Audio (320kbps)",
-                        format = "MP3",
-                        estimatedBytes = baseSize,
-                        downloadUrl = url,
-                        isAudioOnly = true
-                    ),
-                    ExtractedVideoOption(
-                        qualityLabel = "Standard Audio (192kbps)",
-                        format = "MP3",
-                        estimatedBytes = (baseSize * 0.6).toLong(),
-                        downloadUrl = url,
-                        isAudioOnly = true
-                    )
-                )
-            } else {
-                listOf(
-                    ExtractedVideoOption(
-                        qualityLabel = "1080p FHD",
-                        format = "MP4",
-                        estimatedBytes = (baseSize * 1.5).toLong(),
-                        downloadUrl = url
-                    ),
-                    ExtractedVideoOption(
-                        qualityLabel = "720p HD",
-                        format = "MP4",
-                        estimatedBytes = baseSize,
-                        downloadUrl = url
-                    ),
-                    ExtractedVideoOption(
-                        qualityLabel = "480p SD",
-                        format = "MP4",
-                        estimatedBytes = (baseSize * 0.55).toLong(),
-                        downloadUrl = url
-                    ),
-                    ExtractedVideoOption(
-                        qualityLabel = "Audio Only (MP3)",
-                        format = "MP3",
-                        estimatedBytes = (baseSize * 0.15).toLong(),
-                        downloadUrl = url,
-                        isAudioOnly = true
-                    )
+            // An HTML document is a page, not a media file: let yt-dlp handle it.
+            if (contentType.contains("text/html", ignoreCase = true)) {
+                return@withContext Result.failure(
+                    IllegalStateException("This link is a web page, not a direct media file")
                 )
             }
+
+            val extension = fileName.substringAfterLast('.', "").lowercase().ifBlank {
+                when {
+                    contentType.contains("audio") -> "mp3"
+                    contentType.contains("video") -> "mp4"
+                    contentType.contains("image") -> "jpg"
+                    else -> "bin"
+                }
+            }
+            if (contentType.isBlank() && extension !in DIRECT_MEDIA_EXTENSIONS) {
+                return@withContext Result.failure(
+                    IllegalStateException("Could not identify any media at this link")
+                )
+            }
+
+            val title = fileName.substringBeforeLast(".")
+                .replace("_", " ")
+                .replace("-", " ")
+                .trim()
+                .ifBlank { "Downloaded media" }
+            val cleanTitle = if (title.length > 60) title.take(60) + "…" else title
+
+            val isAudio = contentType.contains("audio") || extension in AUDIO_EXTENSIONS
+            val isImage = contentType.contains("image") || extension in IMAGE_EXTENSIONS
+
+            val option = ExtractedVideoOption(
+                qualityLabel = when {
+                    isAudio -> "Original audio (${extension.uppercase()})"
+                    isImage -> "Image (${extension.uppercase()})"
+                    else -> "Original quality (${extension.uppercase()})"
+                },
+                format = extension.uppercase(),
+                estimatedBytes = contentLength,
+                downloadUrl = url,
+                isAudioOnly = isAudio,
+                engine = DownloadEngine.HTTP
+            )
 
             Result.success(
                 VideoInfo(
                     title = cleanTitle,
                     sourceUrl = url,
-                    thumbnailUrl = null,
-                    durationSeconds = 185L,
-                    author = "Direct Stream",
-                    options = options
+                    thumbnailUrl = if (isImage) url else null,
+                    durationSeconds = 0L,
+                    author = "Direct link",
+                    options = listOf(option)
                 )
             )
         } catch (e: Exception) {
@@ -146,6 +188,15 @@ class VideoExtractor(
     }
 
     companion object {
-        const val USER_AGENT = "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Mobile Safari/537.36"
+        const val USER_AGENT =
+            "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Mobile Safari/537.36"
+
+        private val AUDIO_EXTENSIONS = setOf("mp3", "m4a", "aac", "wav", "ogg", "opus", "flac")
+        private val IMAGE_EXTENSIONS = setOf("jpg", "jpeg", "png", "webp", "gif", "bmp", "avif")
+
+        private val DIRECT_MEDIA_EXTENSIONS = AUDIO_EXTENSIONS + IMAGE_EXTENSIONS + setOf(
+            "mp4", "webm", "mkv", "mov", "avi", "flv", "3gp", "ts", "m4v", "mpg", "mpeg", "wmv",
+            "pdf", "apk", "zip", "rar", "7z", "tar", "gz", "doc", "docx", "xls", "xlsx"
+        )
     }
 }

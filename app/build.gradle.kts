@@ -18,25 +18,40 @@ android {
     targetSdk = 36
     versionCode = 1
     versionName = "1.0"
-    // Optional HTTPS yt-dlp service. The APK never embeds credentials.
+    // Optional HTTPS yt-dlp service, used only as a fallback when the bundled
+    // on-device engine cannot start. The APK never embeds credentials.
     buildConfigField("String", "YTDLP_API_URL", "\"${System.getenv("YTDLP_API_URL") ?: ""}\"")
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+    // The bundled yt-dlp engine ships native python/ffmpeg binaries per ABI.
+    // Limiting the ABI set keeps the APK to a sane size; every current phone is
+    // covered by these two.
+    ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
   }
 
+  // Keystores are intentionally not committed (see .gitignore), so only register a
+  // signing config when the keystore actually exists. Referencing a missing file
+  // fails the build with "Keystore file not found", which is what broke CI builds.
+  val releaseKeystore = file(System.getenv("KEYSTORE_PATH") ?: "${rootDir}/my-upload-key.jks")
+  val debugKeystore = file("${rootDir}/debug.keystore")
+
   signingConfigs {
-    create("release") {
-      val keystorePath = System.getenv("KEYSTORE_PATH") ?: "${rootDir}/my-upload-key.jks"
-      storeFile = file(keystorePath)
-      storePassword = System.getenv("STORE_PASSWORD")
-      keyAlias = "upload"
-      keyPassword = System.getenv("KEY_PASSWORD")
+    if (releaseKeystore.exists()) {
+      create("release") {
+        storeFile = releaseKeystore
+        storePassword = System.getenv("STORE_PASSWORD")
+        keyAlias = "upload"
+        keyPassword = System.getenv("KEY_PASSWORD")
+      }
     }
-    create("debugConfig") {
-      storeFile = file("${rootDir}/debug.keystore")
-      storePassword = "android"
-      keyAlias = "androiddebugkey"
-      keyPassword = "android"
+    if (debugKeystore.exists()) {
+      create("debugConfig") {
+        storeFile = debugKeystore
+        storePassword = "android"
+        keyAlias = "androiddebugkey"
+        keyPassword = "android"
+      }
     }
   }
 
@@ -45,9 +60,13 @@ android {
       isCrunchPngs = false
       isMinifyEnabled = false
       proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-      signingConfig = signingConfigs.getByName("release")
+      // Falls back to an unsigned release build when no upload keystore is present.
+      signingConfigs.findByName("release")?.let { signingConfig = it }
     }
-    debug { signingConfig = signingConfigs.getByName("debugConfig") }
+    debug {
+      // Falls back to AGP's auto-generated ~/.android/debug.keystore.
+      signingConfigs.findByName("debugConfig")?.let { signingConfig = it }
+    }
   }
   compileOptions {
     sourceCompatibility = JavaVersion.VERSION_11
@@ -57,6 +76,9 @@ android {
     compose = true
     buildConfig = true
   }
+  // yt-dlp runs python/ffmpeg as real executables out of the app's native library
+  // directory, so the .so payloads must be extracted at install time.
+  packaging { jniLibs { useLegacyPackaging = true } }
   testOptions { unitTests { isIncludeAndroidResources = true } }
   dependenciesInfo {
     includeInApk = false
@@ -120,6 +142,9 @@ dependencies {
   implementation(libs.okhttp)
   // implementation(libs.play.services.location)
   implementation(libs.retrofit)
+  // Bundled yt-dlp engine (python + yt-dlp) and ffmpeg for muxing/transcoding.
+  implementation(libs.youtubedl.android)
+  implementation(libs.youtubedl.android.ffmpeg)
   testImplementation(libs.androidx.compose.ui.test.junit4)
   testImplementation(libs.androidx.core)
   testImplementation(libs.androidx.junit)

@@ -30,12 +30,16 @@ import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Storage
+import androidx.compose.material.icons.filled.Memory
 import androidx.compose.material.icons.filled.Tab
 import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.filled.Update
 import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilterChip
@@ -64,6 +68,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.download.AppDownloadManager
+import com.example.download.YtDlpEngine
 import com.example.ui.MainViewModel
 
 @Composable
@@ -80,6 +85,9 @@ fun SettingsScreen(
     val themeMode by viewModel.themeMode.collectAsStateWithLifecycle()
     val tabs by viewModel.browserTabs.collectAsStateWithLifecycle()
     val isAdBlockEnabled by viewModel.isAdBlockEnabled.collectAsStateWithLifecycle()
+    val ytDlpStatus by viewModel.ytDlpStatus.collectAsStateWithLifecycle()
+    val isUpdatingYtDlp by viewModel.isUpdatingYtDlp.collectAsStateWithLifecycle()
+    val ytDlpMessage by viewModel.ytDlpMessage.collectAsStateWithLifecycle()
 
     var showClearHistoryDialog by remember { mutableStateOf(false) }
     var showClearBrowserDialog by remember { mutableStateOf(false) }
@@ -272,6 +280,121 @@ fun SettingsScreen(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 maxLines = 1
                             )
+                        }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(20.dp))
+
+            // Download Engine (bundled yt-dlp)
+            Text(
+                text = "Download Engine",
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("ytdlp_engine_card"),
+                shape = RoundedCornerShape(16.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    val statusText = when (val status = ytDlpStatus) {
+                        is YtDlpEngine.Status.Ready ->
+                            "Ready • ${status.version?.let { "yt-dlp $it" } ?: "bundled yt-dlp build"}"
+
+                        YtDlpEngine.Status.Initializing -> "Unpacking python & ffmpeg…"
+                        is YtDlpEngine.Status.Unavailable -> "Unavailable — ${status.reason}"
+                        YtDlpEngine.Status.Idle -> "Starting up…"
+                    }
+                    val statusColor = when (ytDlpStatus) {
+                        is YtDlpEngine.Status.Ready -> MaterialTheme.colorScheme.primary
+                        is YtDlpEngine.Status.Unavailable -> MaterialTheme.colorScheme.error
+                        else -> MaterialTheme.colorScheme.onSurfaceVariant
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Memory,
+                            contentDescription = null,
+                            tint = statusColor,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "yt-dlp engine (on-device)",
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            Text(
+                                text = statusText,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = statusColor,
+                                modifier = Modifier.testTag("ytdlp_status_text")
+                            )
+                        }
+                        if (isUpdatingYtDlp) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(20.dp),
+                                strokeWidth = 2.dp
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    Text(
+                        text = "YouTube, TikTok, Instagram, X, Facebook and a thousand other sites " +
+                            "are resolved by the bundled yt-dlp binary. Separate video and audio " +
+                            "streams are merged on device with ffmpeg, so 1080p and above work.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    Button(
+                        onClick = { viewModel.updateYtDlpEngine() },
+                        enabled = !isUpdatingYtDlp,
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.testTag("update_ytdlp_btn")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Update,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = if (isUpdatingYtDlp) "Updating…" else "Update yt-dlp",
+                            style = MaterialTheme.typography.labelLarge
+                        )
+                    }
+
+                    ytDlpMessage?.let { message ->
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = message,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.weight(1f)
+                            )
+                            TextButton(onClick = { viewModel.dismissYtDlpMessage() }) {
+                                Text("Dismiss", style = MaterialTheme.typography.labelSmall)
+                            }
                         }
                     }
                 }

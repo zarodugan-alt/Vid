@@ -69,6 +69,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.data.model.DownloadTask
 import com.example.data.model.MediaType
 import com.example.download.AppDownloadManager
+import com.example.ui.components.MediaThumbnail
 import com.example.ui.LibrarySortBy
 import com.example.ui.MainViewModel
 import com.example.ui.navigation.Screen
@@ -484,20 +485,15 @@ fun CompletedMediaCard(
             verticalAlignment = Alignment.CenterVertically
         ) {
             // Media Thumbnail Preview with Play Icon
-            Box(
+            MediaThumbnail(
+                model = task.thumbnailUrl,
+                fallbackIcon = if (isAudio) Icons.Default.MusicNote else Icons.Default.Movie,
+                iconTint = MaterialTheme.colorScheme.primary,
                 modifier = Modifier
                     .size(62.dp)
                     .clip(RoundedCornerShape(12.dp))
-                    .background(MaterialTheme.colorScheme.surfaceVariant),
-                contentAlignment = Alignment.Center
+                    .background(MaterialTheme.colorScheme.surfaceVariant)
             ) {
-                Icon(
-                    imageVector = if (isAudio) Icons.Default.MusicNote else Icons.Default.Movie,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(28.dp)
-                )
-
                 // Play overlay pill
                 Box(
                     modifier = Modifier

@@ -27,16 +27,24 @@ jobs:
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          # The legacy "tools" package was removed from the SDK repository, and the
+          # action's historical default (`tools platform-tools`) makes sdkmanager
+          # fail with "Failed to find package 'tools'". Only ask for what we need.
+          packages: platform-tools
 
       - name: Install Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: "8.13"
+          # AGP 9.1.x requires Gradle 9.3.1+; keep this in sync with
+          # gradle/wrapper/gradle-wrapper.properties.
+          gradle-version: "9.3.1"
 
       - name: Build debug APK
         env:
-          # Optional. If unset, social URLs fail clearly and direct media URLs
-          # remain available. Configure this repository variable for yt-dlp.
+          # Optional fallback only: extraction normally runs on the bundled
+          # on-device yt-dlp engine. This service is used when that engine cannot
+          # start (unsupported ABI). Unset is fine.
           YTDLP_API_URL: ${{ vars.YTDLP_API_URL }}
         run: gradle --no-daemon --stacktrace :app:assembleDebug
 
@@ -47,3 +55,16 @@ jobs:
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
           retention-days: 14
+
+      # Runs after the artifact upload so a test problem never hides the APK.
+      - name: Run unit tests
+        run: gradle --no-daemon --stacktrace :app:testDebugUnitTest
+
+      - name: Upload test report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-report
+          path: app/build/reports/tests/testDebugUnitTest
+          if-no-files-found: ignore
+          retention-days: 7
