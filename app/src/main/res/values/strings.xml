@@ -1,0 +1,18 @@
+<resources>
+    <string name="app_name">VidDownloader</string>
+    <string name="tab_link">Direct Link</string>
+    <string name="tab_browser">Web Browser</string>
+    <string name="tab_downloading">Progress</string>
+    <string name="tab_finished">Library</string>
+    <string name="tab_settings">Settings</string>
+    
+    <string name="paste_url_hint">Paste video link (YouTube, TikTok, IG, FB, X, Web)...</string>
+    <string name="paste_clipboard">Paste from clipboard</string>
+    <string name="fetch_video_info">Fetch Video Info</string>
+    <string name="browser_search_hint">Search or type web address...</string>
+    <string name="detected_media">Detected Media</string>
+    <string name="download_now">Download Now</string>
+    <string name="pause_all">Pause All</string>
+    <string name="resume_all">Resume All</string>
+    <string name="clear_completed">Clear Completed</string>
+</resources>

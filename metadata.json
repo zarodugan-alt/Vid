@@ -1,0 +1,6 @@
+{
+  "name": "VidDownloader",
+  "description": "Video downloader app with URL extractor, built-in browser media sniffer, background multi-thread download manager, advanced gesture video player, and media library.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
