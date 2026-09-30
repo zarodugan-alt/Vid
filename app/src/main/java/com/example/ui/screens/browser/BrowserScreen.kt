@@ -120,13 +120,15 @@ private const val CHROME_DESKTOP_USER_AGENT =
 
 private const val MEDIA_SNIFFER_JS = """
 (function() {
+    // Only MP4 video is offered for download. Audio, images, documents and
+    // other file types are intentionally ignored so the download list stays clean.
     function scanMedia() {
-        // 1. Scan HTML5 media elements
-        var mediaElements = document.querySelectorAll('video, audio, source, track');
+        // 1. Scan HTML5 video elements only
+        var mediaElements = document.querySelectorAll('video, video source');
         mediaElements.forEach(function(el) {
             var src = el.src || el.currentSrc;
             if (src && src.startsWith('http')) {
-                var mime = el.type || (src.indexOf('.mp3') !== -1 ? 'audio/mpeg' : 'video/mp4');
+                var mime = el.type || 'video/mp4';
                 var title = document.title || 'Web Video';
                 if (window.MediaSniffer) {
                     window.MediaSniffer.onMediaFound(src, mime, title);
@@ -134,20 +136,14 @@ private const val MEDIA_SNIFFER_JS = """
             }
         });
 
-        // 2. Scan direct media and file links
+        // 2. Scan direct MP4 video links only
         var links = document.querySelectorAll('a[href]');
         links.forEach(function(a) {
             var href = a.href;
-            if (href && (/\.(mp4|webm|m3u8|mp3|m4a|wav|pdf|apk|zip|rar|tar|gz|docx|xlsx)(\?|$)/i).test(href)) {
-                var label = a.innerText.trim() || document.title || 'File';
-                var mime = 'application/octet-stream';
-                if (href.indexOf('.mp4') !== -1) mime = 'video/mp4';
-                else if (href.indexOf('.mp3') !== -1) mime = 'audio/mpeg';
-                else if (href.indexOf('.pdf') !== -1) mime = 'application/pdf';
-                else if (href.indexOf('.apk') !== -1) mime = 'application/vnd.android.package-archive';
-                else if (href.indexOf('.zip') !== -1) mime = 'application/zip';
+            if (href && (/\.(mp4|m4v)(\?|$)/i).test(href)) {
+                var label = a.innerText.trim() || document.title || 'Video';
                 if (window.MediaSniffer) {
-                    window.MediaSniffer.onMediaFound(href, mime, label);
+                    window.MediaSniffer.onMediaFound(href, 'video/mp4', label);
                 }
             }
         });
@@ -161,7 +157,7 @@ private const val MEDIA_SNIFFER_JS = """
     }
 
     document.addEventListener('play', function(e) {
-        if (e.target && (e.target.tagName === 'VIDEO' || e.target.tagName === 'AUDIO')) {
+        if (e.target && e.target.tagName === 'VIDEO') {
             var src = e.target.currentSrc || e.target.src;
             if (src && src.startsWith('http') && window.MediaSniffer) {
                 var mime = e.target.type || 'video/mp4';
@@ -213,17 +209,11 @@ fun BrowserScreen(
             webViewRef?.let { wv ->
                 val currentWvUrl = wv.url ?: ""
                 val lowerUrl = currentWvUrl.lowercase()
-                val isDirectMediaOrFile = listOf(
-                    ".mp4", ".webm", ".mkv", ".mp3", ".m4a", ".pdf", ".apk", ".zip", ".rar", "videoplayback"
-                ).any { lowerUrl.contains(it) }
-                if (isDirectMediaOrFile) {
-                    val mime = when {
-                        lowerUrl.contains(".mp3") || lowerUrl.contains(".m4a") -> "audio/mpeg"
-                        lowerUrl.contains(".pdf") -> "application/pdf"
-                        lowerUrl.contains(".apk") -> "application/vnd.android.package-archive"
-                        lowerUrl.contains(".zip") -> "application/zip"
-                        else -> "video/mp4"
-                    }
+                // Only direct MP4 video links are offered for download.
+                val isDirectVideo = listOf(".mp4", ".m4v", "videoplayback")
+                    .any { lowerUrl.contains(it) }
+                if (isDirectVideo) {
+                    val mime = "video/mp4"
                     val filename = URLUtil.guessFileName(currentWvUrl, null, mime)
                     viewModel.registerDetectedMedia(currentWvUrl, mime, filename)
                 }
@@ -807,22 +797,14 @@ fun BrowserScreen(
                                     val url = request?.url?.toString() ?: return false
                                     val lowerUrl = url.lowercase()
 
-                                    // Catch direct media/file downloads clicked on pages
-                                    val isDownloadableFile = listOf(
-                                        ".mp4", ".webm", ".mkv", ".mp3", ".m4a", ".wav", ".pdf", ".apk",
-                                        ".zip", ".rar", ".7z", ".tar", ".gz", ".docx", ".xlsx"
-                                    ).any { lowerUrl.contains(it) } && !lowerUrl.contains(".html") && !lowerUrl.contains(".php")
+                                    // Catch direct MP4 video downloads clicked on pages
+                                    val isDownloadableVideo = listOf(".mp4", ".m4v")
+                                        .any { lowerUrl.contains(it) } &&
+                                        !lowerUrl.contains(".html") && !lowerUrl.contains(".php")
 
-                                    if (isDownloadableFile) {
-                                        val guessedName = URLUtil.guessFileName(url, null, null)
-                                        val mime = when {
-                                            lowerUrl.contains(".mp3") || lowerUrl.contains(".m4a") -> "audio/mpeg"
-                                            lowerUrl.contains(".pdf") -> "application/pdf"
-                                            lowerUrl.contains(".apk") -> "application/vnd.android.package-archive"
-                                            lowerUrl.contains(".zip") -> "application/zip"
-                                            else -> "video/mp4"
-                                        }
-                                        viewModel.registerDetectedMedia(url, mime, guessedName)
+                                    if (isDownloadableVideo) {
+                                        val guessedName = URLUtil.guessFileName(url, null, "video/mp4")
+                                        viewModel.registerDetectedMedia(url, "video/mp4", guessedName)
                                         viewModel.toggleDetectedMediaSheet(true)
                                         return true
                                     }
@@ -858,27 +840,12 @@ fun BrowserScreen(
                                 ): WebResourceResponse? {
                                     val reqUrl = request?.url?.toString() ?: ""
                                     val lower = reqUrl.lowercase()
-                                    val isMediaStream = lower.contains(".mp4") || lower.contains(".webm") ||
-                                        lower.contains(".m3u8") || lower.contains(".mp3") || lower.contains(".m4a") ||
-                                        lower.contains(".aac") || lower.contains(".wav") || lower.contains(".ogg") ||
-                                        lower.contains("videoplayback") || lower.contains("/video/") ||
-                                        lower.contains("mime=video") || lower.contains("mime=audio") ||
-                                        lower.contains(".flv") || lower.contains(".mkv")
+                                    // Only sniff MP4 video streams; audio, images and other files are ignored.
+                                    val isVideoStream = lower.contains(".mp4") || lower.contains(".m4v") ||
+                                        lower.contains("videoplayback") || lower.contains("mime=video")
 
-                                    val isFileDownload = lower.contains(".pdf") || lower.contains(".apk") ||
-                                        lower.contains(".zip") || lower.contains(".rar") || lower.contains(".tar") ||
-                                        lower.contains(".gz") || lower.contains(".docx") || lower.contains(".xlsx")
-
-                                    if (isMediaStream || isFileDownload) {
-                                        val mime = when {
-                                            lower.contains(".mp3") || lower.contains(".m4a") || lower.contains(".aac") || lower.contains("mime=audio") -> "audio/mpeg"
-                                            lower.contains(".webm") -> "video/webm"
-                                            lower.contains(".m3u8") -> "application/x-mpegURL"
-                                            lower.contains(".pdf") -> "application/pdf"
-                                            lower.contains(".apk") -> "application/vnd.android.package-archive"
-                                            lower.contains(".zip") -> "application/zip"
-                                            else -> "video/mp4"
-                                        }
+                                    if (isVideoStream) {
+                                        val mime = "video/mp4"
                                         val filename = try {
                                             URLUtil.guessFileName(reqUrl, null, mime)
                                         } catch (_: Exception) {
@@ -916,23 +883,21 @@ fun BrowserScreen(
                             }
 
                             setDownloadListener { url, _, contentDisposition, mimetype, contentLength ->
-                                val guessedName = URLUtil.guessFileName(url, contentDisposition, mimetype)
                                 val lower = url.lowercase()
-                                val detectedMime = if (!mimetype.isNullOrBlank()) mimetype else when {
-                                    lower.contains(".mp3") || lower.contains(".m4a") -> "audio/mpeg"
-                                    lower.contains(".pdf") -> "application/pdf"
-                                    lower.contains(".apk") -> "application/vnd.android.package-archive"
-                                    lower.contains(".zip") -> "application/zip"
-                                    else -> "video/mp4"
-                                }
-                                post {
-                                    viewModel.registerDetectedMedia(
-                                        url = url,
-                                        mimeType = detectedMime,
-                                        title = guessedName,
-                                        contentLength = if (contentLength > 0) contentLength else 0L
-                                    )
-                                    viewModel.toggleDetectedMediaSheet(true)
+                                val isVideo = (mimetype?.startsWith("video/", ignoreCase = true) == true) ||
+                                    lower.contains(".mp4") || lower.contains(".m4v")
+                                // Only MP4 videos are captured; other downloads are ignored.
+                                if (isVideo) {
+                                    val guessedName = URLUtil.guessFileName(url, contentDisposition, "video/mp4")
+                                    post {
+                                        viewModel.registerDetectedMedia(
+                                            url = url,
+                                            mimeType = "video/mp4",
+                                            title = guessedName,
+                                            contentLength = if (contentLength > 0) contentLength else 0L
+                                        )
+                                        viewModel.toggleDetectedMediaSheet(true)
+                                    }
                                 }
                             }
 

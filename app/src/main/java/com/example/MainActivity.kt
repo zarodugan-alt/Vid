@@ -7,6 +7,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.Badge
@@ -18,9 +19,15 @@ import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.core.tween
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
@@ -28,6 +35,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.ui.MainViewModel
+import com.example.ui.SplashScreen
 import com.example.ui.navigation.Screen
 import com.example.ui.screens.browser.BrowserScreen
 import com.example.ui.screens.downloading.DownloadingScreen
@@ -55,7 +63,20 @@ class MainActivity : ComponentActivity() {
             }
 
             VidDownloaderTheme(darkTheme = isDark) {
-                MainAppScaffold(viewModel = viewModel)
+                // Keep the splash from replaying on configuration changes.
+                var showSplash by rememberSaveable { mutableStateOf(true) }
+
+                Box(modifier = Modifier.fillMaxSize()) {
+                    MainAppScaffold(viewModel = viewModel)
+
+                    AnimatedVisibility(
+                        visible = showSplash,
+                        enter = androidx.compose.animation.EnterTransition.None,
+                        exit = fadeOut(animationSpec = tween(500))
+                    ) {
+                        SplashScreen(onFinished = { showSplash = false })
+                    }
+                }
             }
         }
     }

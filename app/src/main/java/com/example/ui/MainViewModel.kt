@@ -358,15 +358,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             // Real HTTP verification: HEAD/GET request ensures only real media is listed
             val probed = MediaProbe.probe(url, currentPage) ?: return@launch
 
+            // Only offer video files (MP4 and video streams). Audio, images and
+            // documents are deliberately excluded from the download list.
+            if (probed.mediaType != MediaType.VIDEO) return@launch
+
             val cleanTitle = title?.takeIf {
                 it.isNotBlank() && it != "null" && it != "Web Video" && it != "File" && it != "Playing Media"
             } ?: probed.fileName
 
-            val qualityLabel = when (probed.mediaType) {
-                MediaType.AUDIO -> "Audio (${probed.extension.uppercase()})"
-                MediaType.DOCUMENT -> "${probed.extension.uppercase()} File"
-                MediaType.IMAGE -> "Image (${probed.extension.uppercase()})"
-                else -> if (probed.isStreamManifest) "HD Stream" else "Video (${probed.extension.uppercase()})"
+            val qualityLabel = if (probed.isStreamManifest) {
+                "HD Stream"
+            } else {
+                "Video (${probed.extension.uppercase()})"
             }
 
             val item = DetectedMedia(

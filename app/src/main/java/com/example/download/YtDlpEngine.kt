@@ -124,8 +124,12 @@ object YtDlpEngine {
                 val request = YoutubeDLRequest(url)
                     .addOption("--no-playlist")
                     .addOption("--no-warnings")
-                    .addOption("--socket-timeout", 20)
-                    .addOption("--extractor-args", "youtube:player_client=android,web;player_skip=configs")
+                    // Don't verify each format with an extra request; formats are still listed.
+                    .addOption("--no-check-formats")
+                    .addOption("--socket-timeout", 15)
+                    // The Android player client answers in a single request; skipping the
+                    // watch page HTML and player configs removes several round trips.
+                    .addOption("--extractor-args", "youtube:player_client=android;player_skip=webpage,configs")
 
                 cacheDirPath?.let { request.addOption("--cache-dir", it) }
 
